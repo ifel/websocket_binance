@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::RwLock};
 
@@ -67,35 +68,54 @@ struct ReceivedMessage {
 #[tokio::main]
 async fn main() {
     let streams = consts::get_stream_names();
-    let map: Arc<RwLock<HashMap<String, MessageData>>> = Arc::new(RwLock::new(HashMap::new()));
+    let first_stream_name = streams[0];
+    let map: Arc<HashMap<String, RwLock<MessageData>>> = Arc::new(
+        streams
+        .iter()
+        .map(|stream| (
+            stream.to_string(), RwLock::new(MessageData::default())
+        )).collect()
+    );
     let url = format!("wss://fstream.binance.com/stream?streams={}", streams.join("/"));
-    let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
-    ws_stream.for_each(|message| {
-        let map = map.clone();
-        async move {
-            let start = Instant::now();
-            if let Ok(message) = message {
-                if let Err(err) = process_message(message, &map).await
-                {
-                    println!("Error processing message: {:?}", err);
+
+    let dump_counter = Arc::new(AtomicUsize::new(0));
+    
+    loop {
+        let (ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+        ws_stream.for_each(|message| {
+            let map = map.clone();
+            let dump_counter = dump_counter.clone();
+            async move {
+                let start = Instant::now();
+                if let Ok(message) = message {
+                    if let Err(err) = process_message(message, &map).await
+                    {
+                        println!("Error processing message: {:?}", err);
+                    }
+                };
+                let duration = start.elapsed();
+                println!("Time elapsed in process_message() is: {:?}", duration);
+                let dump_counter_previous_value = dump_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if dump_counter_previous_value >= 100 {
+                    if let Ok(val) = map[first_stream_name].read() {
+                        println!("{first_stream_name} data {:#?}", val);
+                    }
+                    
+                    dump_counter.store(0, std::sync::atomic::Ordering::Relaxed);
                 }
-            };
-        let duration = start.elapsed();
-            println!("Time elapsed in process_message() is: {:?}", duration);
-            if let Ok(mp) = map.read() {
-                println!("{:?}", mp.len());
-            }
-        }}).await;
+            }}).await;
+        println!("Stream is finished");
+    }
 }
 
-async fn process_message(message: Message, map: &Arc<RwLock<HashMap<String, MessageData>>>) -> Result<(), Box<dyn Error + Send + Sync>>{
+async fn process_message(message: Message, map: &Arc<HashMap<String, RwLock<MessageData>>>) -> Result<(), Box<dyn Error + Send + Sync>>{
     // let data2_ = message.clone().into_text()?;
     // println!("{:?}", data2_);
     let data_ = message.into_data();
     let msg: ReceivedMessage = serde_json::from_slice(&data_)?;
     // println!("Received message: {:#?}", msg);
-    if let Ok(mut mp) = map.write() {
-        mp.insert(msg.stream, msg.data);
+    if let Ok(mut val) = map[&msg.stream].write() {
+        *val = msg.data;
     };
     Ok(())
 }
