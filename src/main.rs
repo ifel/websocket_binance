@@ -7,6 +7,38 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use futures_util::StreamExt;
 use std::time::Instant;
 use std::error::Error;
+use std::fmt;
+use std::marker::PhantomData;
+use serde::de;
+use anyhow::Result;
+
+type PricePair = (f32, f32);
+
+fn deserialize_string_tuple_vec<'de, D>(deserializer: D) -> Result<Vec<PricePair>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    struct StringTupleVecVisitor(PhantomData<Vec<PricePair>>);
+
+    impl <'de> de::Visitor<'de> for StringTupleVecVisitor {
+        type Value = Vec<PricePair>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a vector of string tuples that can be parsed as f32 and f32")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error> where A: de::SeqAccess<'de>, {
+            let mut result = vec![];
+            while let Some(tuple) = seq.next_element::<(&str, &str)>()? {
+                let price = tuple.0.parse::<f32>().map_err(de::Error::custom)?;
+                let quantity = tuple.1.parse::<f32>().map_err(de::Error::custom)?;
+                result.push((price, quantity));
+            }
+            Ok(result)
+        }
+    }
+    deserializer.deserialize_seq(StringTupleVecVisitor(PhantomData))
+}
 
 #[derive(Deserialize, Debug)]
 struct MessageData {
@@ -17,7 +49,10 @@ struct MessageData {
     U: u64,
     u: u64,
     pu: u64,
-    b: Vec<Vec<String>>,
+    #[serde(deserialize_with = "deserialize_string_tuple_vec")]
+    b: Vec<PricePair>,
+    #[serde(deserialize_with = "deserialize_string_tuple_vec")]
+    a: Vec<PricePair>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -50,6 +85,8 @@ async fn main() {
 }
 
 async fn process_message(message: Message, map: &Arc<RwLock<HashMap<String, MessageData>>>) -> Result<(), Box<dyn Error + Send + Sync>>{
+    // let data2_ = message.clone().into_text()?;
+    // println!("{:?}", data2_);
     let data_ = message.into_data();
     let msg: ReceivedMessage = serde_json::from_slice(&data_)?;
     // println!("Received message: {:#?}", msg);
