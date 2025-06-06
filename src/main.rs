@@ -36,21 +36,22 @@ where
                 let quantity = tuple.1.parse::<f32>().map_err(de::Error::custom)?;
                 result.push((price, quantity));
             }
+            result.sort_by(|x, y| x.partial_cmp(y).expect("Failed to sort price pairs"));
             Ok(result)
         }
     }
     deserializer.deserialize_seq(StringTupleVecVisitor(PhantomData))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 struct MessageData {
-    e: String,
-    E: u64,
-    T: u64,
-    s: String,
-    U: u64,
-    u: u64,
-    pu: u64,
+    // e: String,
+    // E: u64,
+    // T: u64,
+    // s: String,
+    // U: u64,
+    // u: u64,
+    // pu: u64,
     #[serde(deserialize_with = "deserialize_string_tuple_vec")]
     b: Vec<PricePair>,
     #[serde(deserialize_with = "deserialize_string_tuple_vec")]
