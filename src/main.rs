@@ -1,7 +1,8 @@
 use serde::Deserialize;
 
 use tokio;
-use std::time::Instant;
+use std::time::Duration;
+use std::{thread::sleep, time::Instant};
 use std::fmt;
 use std::marker::PhantomData;
 use std::thread;
@@ -80,7 +81,13 @@ fn process_stream(stream_name: &str) {
     let mut processing_times: [f64; PROCESS_MESSAGES] = [0.0; PROCESS_MESSAGES];
     let mut latencies: [f64; PROCESS_MESSAGES] = [0.0; PROCESS_MESSAGES];
     loop {
-        let (mut ws_stream, _) = connect(&url).expect("Failed to connect");
+        let connect_result = connect(&url);
+        if let Err(err) = connect_result {
+            println!("Failed to connect to stream for {url}: {err}");
+            sleep(Duration::from_millis(1000));
+            continue;
+        }
+        let (mut ws_stream, _) = connect_result.unwrap();
         let mut last_message_received_timestamp = Instant::now();
         loop {
             let Ok(message) = ws_stream.read() else {
