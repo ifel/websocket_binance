@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.98"
+floating-duration = "0.1.2"
 serde = { version = "1.0.219", features = ["serde_derive"] }
 serde_bytes = "0.11.17"
 serde_json = "1.0.140"
+stats-cli = "3.0.1"
 tokio = { version = "1.45.1", features = ["full", "io-std"] }
 tungstenite = { version = "0.26.2", features = ["native-tls"] }

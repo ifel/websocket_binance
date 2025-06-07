@@ -8,6 +8,7 @@ use std::thread;
 use serde::de;
 use anyhow::Result;
 use tungstenite::{connect};
+use floating_duration::TimeAsFloat;
 
 mod consts;
 
@@ -69,12 +70,18 @@ async fn main() {
     let _ = handles.into_iter().map(|handle| handle.join().expect("Failed to join thread")).collect::<Vec<_>>();
 }
 
+const PROCESS_MESSAGES: usize = 1000;
+
 fn process_stream(stream_name: &str) {
     let url = format!("wss://fstream.binance.com/stream?streams={}", stream_name);
     let mut current_data = ReceivedMessage::default();
+    let mut message_counter = 0;
+    let mut stop_execution = false;
+    let mut processing_times: [f64; PROCESS_MESSAGES] = [0.0; PROCESS_MESSAGES];
+    let mut latencies: [f64; PROCESS_MESSAGES] = [0.0; PROCESS_MESSAGES];
     loop {
-        let mut dump_counter = 0;
         let (mut ws_stream, _) = connect(&url).expect("Failed to connect");
+        let mut last_message_received_timestamp = Instant::now();
         loop {
             let Ok(message) = ws_stream.read() else {
                 println!("Error reading from stream");
@@ -85,15 +92,41 @@ fn process_stream(stream_name: &str) {
             let data_ = message.into_data();
             match serde_json::from_slice::<ReceivedMessage>(&data_) {
                 Ok(parsed) => current_data = parsed,
-                Err(err) => println!("Error processing message: {:?}", err)
-            }            
-            let duration = start.elapsed();
-            println!("Time elapsed in process_message() is: {:?}", duration);
-            dump_counter += 1;
-            if dump_counter >= 100 {
-                println!("{stream_name} data {:#?}", current_data);
-                dump_counter = 0;
+                Err(err) => {println!("Error processing message: {:?}", err); continue;}
             }
+            let duration = start.elapsed();
+            // println!("Time elapsed in process_message() is: {:?}", duration);
+            processing_times[message_counter] = duration.as_fractional_micros();
+            latencies[message_counter] = last_message_received_timestamp.elapsed().as_fractional_millis();
+            last_message_received_timestamp = start;
+            message_counter += 1;
+            if message_counter == PROCESS_MESSAGES {
+                stop_execution = true;
+                let processing_times_pct: inc_stats::Percentiles<f64> = processing_times.iter().collect();
+                let latencies_pct: inc_stats::Percentiles<f64> = latencies.iter().collect();
+                
+                let processing_times_p99 = processing_times_pct.percentile(0.99).unwrap().unwrap();
+                let processing_times_p95 = processing_times_pct.percentile(0.95).unwrap().unwrap();
+                let processing_times_p90 = processing_times_pct.percentile(0.90).unwrap().unwrap();
+                let processing_times_p75 = processing_times_pct.percentile(0.75).unwrap().unwrap();
+                let processing_times_med = processing_times_pct.median().unwrap();
+
+                let latencies_p99 = latencies_pct.percentile(0.99).unwrap().unwrap();
+                let latencies_p95 = latencies_pct.percentile(0.95).unwrap().unwrap();
+                let latencies_p90 = latencies_pct.percentile(0.90).unwrap().unwrap();
+                let latencies_p75 = latencies_pct.percentile(0.75).unwrap().unwrap();
+                let latencies_med = latencies_pct.median().unwrap();
+                println!(r##"
+{stream_name}
+Processing Time - P99: {:.3?}µs, P95: {:.3?}µs, P90: {:.3?}µs, P75: {:.3?}µs, Median: {:.3?}µs
+Time between requests - P99: {:.3?}ms, P95: {:.3?}ms, P90: {:.3?}ms, P75: {:.3?}ms, Median: {:.3?}ms 
+"##, processing_times_p99, processing_times_p95, processing_times_p90, processing_times_p75, processing_times_med,
+latencies_p99, latencies_p95, latencies_p90, latencies_p75, latencies_med);
+                break;
+            }
+        }
+        if stop_execution {
+            break;
         }
         println!("Stream is finished");
     }
