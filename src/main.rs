@@ -96,10 +96,14 @@ fn process_stream(stream_name: &str) {
             };
             let start = Instant::now();
 
-            let data_ = message.into_data();
+            if message.is_ping() {
+                continue;
+            }
+
+            let data_ = message.clone().into_data();
             match serde_json::from_slice::<ReceivedMessage>(&data_) {
                 Ok(parsed) => current_data = parsed,
-                Err(err) => {println!("Error processing message: {:?}", err); continue;}
+                Err(err) => {println!("Error processing message: {:?}, message: {:#?}", err, message); continue;}
             }
             let duration = start.elapsed();
             // println!("Time elapsed in process_message() is: {:?}", duration);
